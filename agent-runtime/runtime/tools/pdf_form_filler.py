@@ -65,11 +65,25 @@ def _fitz_y_from_bottom(y_bottom: float, page_height: float) -> float:
 
 
 def _draw_x_mark(page, ox: float, oy_top: float, ow: float, oh: float):
-    """Draw a vector X inside a checkbox box."""
+    """Draw a vector X inside a checkbox box.
+
+    Clamps the drawing area to MAX_CB points so an inflated fallback
+    estimate (where w/h = OCR text height instead of the real checkbox
+    square size) never produces an oversized mark.
+    """
+    # Maximum checkbox size we will ever draw — real checkboxes are 8-12 pt.
+    MAX_CB = 11.0
+    if ow > MAX_CB or oh > MAX_CB:
+        # Re-centre the clamped square within the supplied bounding box.
+        s = min(MAX_CB, ow, oh)
+        ox     = ox     + (ow - s) / 2.0
+        oy_top = oy_top + (oh - s) / 2.0
+        ow = oh = s
+
     try:
         import fitz
         pad = min(ow, oh) * 0.18
-        lw  = max(1.0, min(ow, oh) * 0.13)
+        lw  = max(0.5, min(ow, oh) * 0.10)   # thinner line for small boxes
         shp = page.new_shape()
         shp.draw_line(fitz.Point(ox + pad,      oy_top + pad),
                       fitz.Point(ox + ow - pad, oy_top + oh - pad))
@@ -361,7 +375,7 @@ def _detect_via_ocr(pdf_path: str, pdf_w: float, pdf_h: float) -> tuple[list, li
                 bb = _phrase_bbox(opt_t)
                 if bb:
                     oh = bb["bottom_pt"] - bb["top_pt"]
-                    bs = max(oh, 8.0)
+                    bs = min(max(oh, 8.0), 10.0)   # cap at realistic checkbox size
                     opts.append({
                         "text": opt_t,
                         "x": max(0.0, bb["left_pt"] - bs - 3),

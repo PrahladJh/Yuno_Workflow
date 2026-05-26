@@ -26,7 +26,7 @@ const ROLES = ['assistant', 'researcher', 'writer', 'analyst', 'classifier', 'co
 const DEFAULT = {
   name: '', description: '', role: 'assistant',
   system_prompt: '', model: 'gpt-4o', tools: [],
-  memory_enabled: false, schedule: '', max_tokens: 2000, temperature: 0.7,
+  memory_enabled: false, max_tokens: 2000, temperature: 0.7,
   guardrails: { max_message_length: 4000, profanity_filter: false }
 };
 
@@ -82,19 +82,6 @@ export default function AgentForm({ initial, onSave, onCancel }) {
           <textarea className="input" rows={4}
             placeholder="You are a helpful AI assistant that..."
             value={form.system_prompt} onChange={e => set('system_prompt', e.target.value)} />
-        </div>
-
-        <div>
-          <label className="label">Schedule</label>
-          <input
-            className="input"
-            placeholder="Cron expression, e.g. 0 9 * * 1-5 for weekdays at 9 AM"
-            value={form.schedule || ''}
-            onChange={e => set('schedule', e.target.value)}
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Optional. Leave empty for manual runs. Examples: */30 * * * * every 30 minutes, 0 9 * * 1 every Monday at 9 AM.
-          </p>
         </div>
 
         <div className="grid grid-cols-3 gap-4">

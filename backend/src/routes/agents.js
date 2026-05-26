@@ -1,7 +1,5 @@
 import { Router } from 'express';
-import cron from 'node-cron';
 import { getDb } from '../db/database.js';
-import { refreshAgentSchedules } from '../services/agentSchedulerService.js';
 
 const router = Router();
 
@@ -32,28 +30,24 @@ router.post('/', async (req, res, next) => {
     const {
       name, description = '', role = 'assistant', system_prompt = '',
       model = 'gpt-4o', tools = [], memory_enabled = false,
-      memory_config = {}, schedule = null, max_tokens = 2000,
+      memory_config = {}, max_tokens = 2000,
       temperature = 0.7, guardrails = {}, channel_id = null
     } = req.body;
 
     if (!name) return res.status(400).json({ error: 'name is required' });
-    if (schedule && !cron.validate(schedule)) {
-      return res.status(400).json({ error: 'Invalid cron expression for schedule' });
-    }
 
     await db.prepare(`
       INSERT INTO agents
         (id,name,description,role,system_prompt,model,tools,memory_enabled,
-         memory_config,schedule,max_tokens,temperature,guardrails,channel_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         memory_config,max_tokens,temperature,guardrails,channel_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       id, name, description, role, system_prompt, model,
       JSON.stringify(tools), memory_enabled ? 1 : 0, JSON.stringify(memory_config),
-      schedule, max_tokens, temperature, JSON.stringify(guardrails), channel_id
+      max_tokens, temperature, JSON.stringify(guardrails), channel_id
     );
 
     const agent = await db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
-    await refreshAgentSchedules();
     res.status(201).json(parseAgent(agent));
   } catch (e) { next(e); }
 });
@@ -64,11 +58,8 @@ router.put('/:id', async (req, res, next) => {
     const db = getDb();
     const existing = await db.prepare('SELECT id FROM agents WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Agent not found' });
-    if (req.body.schedule && !cron.validate(req.body.schedule)) {
-      return res.status(400).json({ error: 'Invalid cron expression for schedule' });
-    }
 
-    const strFields  = ['name','description','role','system_prompt','model','schedule','channel_id','status'];
+    const strFields  = ['name','description','role','system_prompt','model','channel_id','status'];
     const numFields  = ['max_tokens'];
     const floatFields = ['temperature'];
     const jsonFields = ['tools','memory_config','guardrails'];
@@ -89,7 +80,6 @@ router.put('/:id', async (req, res, next) => {
     await db.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
 
     const agent = await db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
-    await refreshAgentSchedules();
     res.json(parseAgent(agent));
   } catch (e) { next(e); }
 });
@@ -100,7 +90,6 @@ router.delete('/:id', async (req, res, next) => {
     const db = getDb();
     const result = await db.prepare('DELETE FROM agents WHERE id = ?').run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ error: 'Agent not found' });
-    await refreshAgentSchedules();
     res.json({ success: true });
   } catch (e) { next(e); }
 });

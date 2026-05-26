@@ -11,7 +11,6 @@ import channelsRouter  from './routes/channels.js';
 import emailRouter     from './routes/email.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { startTelegramBot } from './services/telegramService.js';
-import { startAgentScheduler } from './services/agentSchedulerService.js';
 
 const PORT = process.env.PORT || 3001;
 const app  = express();
@@ -54,12 +53,6 @@ async function start() {
       console.warn('⚠️  Telegram auto-start skipped:', err.message);
     }
 
-    try {
-      await startAgentScheduler();
-      console.log('Agent scheduler started');
-    } catch (err) {
-      console.warn('Agent scheduler skipped:', err.message);
-    }
   });
 }
 

@@ -15,7 +15,6 @@ BEGIN
     tools         NVARCHAR(MAX) DEFAULT '[]',
     memory_enabled BIT          DEFAULT 0,
     memory_config NVARCHAR(MAX) DEFAULT '{}',
-    schedule      NVARCHAR(255) NULL,
     max_tokens    INT           DEFAULT 2000,
     temperature   FLOAT         DEFAULT 0.7,
     guardrails    NVARCHAR(MAX) DEFAULT '{}',

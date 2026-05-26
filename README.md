@@ -104,7 +104,7 @@ backend/
 ├── .env / .env.example
 └── src/
     ├── index.js                       ← Express + HTTP server + Socket.IO
-    │                                    auto-starts Telegram bot & cron scheduler
+    │                                    auto-starts Telegram bot on launch
     ├── db/
     │   ├── database.js                ← SQLite / MSSQL connection + seed templates
     │   ├── schema.sql                 ← SQLite schema (7 tables)
@@ -117,8 +117,7 @@ backend/
     │   └── email.js      /api/email        ← SMTP config
     ├── services/
     │   ├── executionService.js        ← Proxy: SSE stream → Python runtime
-    │   ├── telegramService.js         ← Telegram bot (node-telegram-bot-api)
-    │   └── agentSchedulerService.js   ← Cron scheduler (node-cron)
+    │   └── telegramService.js         ← Telegram bot (node-telegram-bot-api)
     ├── websocket/
     │   └── socketServer.js            ← Socket.IO: run:update, run:log, message:new
     └── middleware/
@@ -278,9 +277,8 @@ role                nodes (JSON)        status
 system_prompt       edges (JSON)        input  (JSON)
 model               trigger_type        output (JSON)
 tools (JSON)        trigger_config      token_usage
-schedule (cron)     is_template         started_at
-temperature         status              completed_at
-max_tokens
+temperature         is_template         started_at
+max_tokens          status              completed_at
 guardrails (JSON)   run_logs            agent_memory
 channel_id          ──────────────      ──────────────
 memory_enabled      run_id (FK)         agent_id (FK)
@@ -441,14 +439,10 @@ Errors are grouped by agent and shown in the chat before execution starts.
    - The ReAct orchestrator plans steps, selects agents, executes them in sequence
    - Streams each plan → action → observation loop live
 
-### Messaging & scheduling
+### Messaging
 6. **Set up Telegram** → Channels → Add Channel
    - Paste bot token, assign an agent
    - Messages from Telegram appear in the Messages tab
-
-7. **Schedule an agent** → Agents → Edit → set a cron schedule
-   - e.g. `0 9 * * 1-5` runs every weekday at 9 AM
-   - Run records appear in Monitoring automatically
 
 ---
 
@@ -476,7 +470,7 @@ Edit `backend/src/db/database.js` → `seedTemplates()`. Add a `db.prepare(...).
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 18, Vite 5, Tailwind CSS 3, Material UI 9, React Flow (@xyflow/react), Recharts, Lucide Icons, Axios, Socket.IO client, react-hot-toast |
-| Backend | Node.js, Express 4, Socket.IO 4, node-cron, node-telegram-bot-api, nodemailer, SQLite / MSSQL |
+| Backend | Node.js, Express 4, Socket.IO 4, node-telegram-bot-api, nodemailer, SQLite / MSSQL |
 | Agent Runtime | Python 3.10+, FastAPI, uvicorn, LangChain 0.3, LangGraph 0.2, OpenAI SDK |
 | LLM | OpenAI GPT-4o / GPT-4o-mini (via LangChain) |
 | PDF Pipeline | PyMuPDF (fitz) — native text + drawing extraction; OCR.space API (Engine 1 + 2); GPT-4o-mini label parsing; GPT-4o vision fallback |

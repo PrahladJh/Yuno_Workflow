@@ -480,18 +480,17 @@ async def detect_pdf_fields(req: PDFDetectRequest):
                     score = len(nl) / len(running)   # 1.0 for exact match
                     if score > best_score:
                         best_score = score
+                        # _page/_page_h captured NOW while i points to the
+                        # correct match word — NOT after the loop ends.
                         best = {
                             "right_pt":  max(word_list[k]["right_pt"]  for k in range(i, j + 1)),
                             "top_pt":    min(word_list[k]["top_pt"]    for k in range(i, j + 1)),
                             "bottom_pt": max(word_list[k]["bottom_pt"] for k in range(i, j + 1)),
                             "left_pt":   min(word_list[k]["left_pt"]   for k in range(i, j + 1)),
+                            "_page":     word_list[i].get("_page", 0),
+                            "_page_h":   word_list[i].get("_page_h", pdf_page_h),
                         }
                     break   # extending only lowers the score
-        # Embed page info from the first word in the match window so callers
-        # know which page this label was found on (critical for multi-page PDFs).
-        if best is not None:
-            best["_page"]   = word_list[i].get("_page", 0)
-            best["_page_h"] = word_list[i].get("_page_h", pdf_page_h)
         return best
 
     # ── get PDF page dimensions + native text/drawing extraction ─────────────
@@ -816,7 +815,10 @@ OCR Text:
                                     cb_page    = opt_page
                                     cb_page_h  = opt_page_h
                                     oh = bb["bottom_pt"] - bb["top_pt"]
-                                    bs = max(oh, 8.0)
+                                    # Cap to realistic checkbox size (real boxes are 8-12pt).
+                                    # OCR word heights can be 14-20pt — using that directly
+                                    # would produce an X mark far larger than the actual box.
+                                    bs = min(max(oh, 8.0), 10.0)
                                     # Use page-specific cb_boxes to avoid cross-page matches
                                     pg_cb_boxes = _fitz_page_data.get(opt_page, {}).get("cb_boxes", fitz_cb_boxes)
                                     drw_cb = _nearest_cb_box(bb, pg_cb_boxes)

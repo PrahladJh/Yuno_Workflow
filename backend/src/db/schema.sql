@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS agents (
   tools TEXT DEFAULT '[]',
   memory_enabled INTEGER DEFAULT 0,
   memory_config TEXT DEFAULT '{}',
-  schedule TEXT DEFAULT NULL,
   max_tokens INTEGER DEFAULT 2000,
   temperature REAL DEFAULT 0.7,
   guardrails TEXT DEFAULT '{}',

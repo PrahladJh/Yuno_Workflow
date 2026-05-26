@@ -89,7 +89,7 @@ async function createTables() {
       description NVARCHAR(MAX) DEFAULT '', role NVARCHAR(100) DEFAULT 'assistant',
       system_prompt NVARCHAR(MAX) DEFAULT '', model NVARCHAR(100) DEFAULT 'gpt-4o',
       tools NVARCHAR(MAX) DEFAULT '[]', memory_enabled BIT DEFAULT 0,
-      memory_config NVARCHAR(MAX) DEFAULT '{}', schedule NVARCHAR(255) NULL,
+      memory_config NVARCHAR(MAX) DEFAULT '{}',
       max_tokens INT DEFAULT 2000, temperature FLOAT DEFAULT 0.7,
       guardrails NVARCHAR(MAX) DEFAULT '{}', channel_id NVARCHAR(36) NULL,
       status NVARCHAR(50) DEFAULT 'idle',

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { agentsApi } from '../services/api.js';
-import { Bot, Plus, Trash2, Edit, Wrench, Brain, MessageCircle, Clock } from 'lucide-react';
+import { Bot, Plus, Trash2, Edit, Wrench, Brain, MessageCircle } from 'lucide-react';
 import AgentForm from '../components/AgentCard/AgentForm.jsx';
 import TestAgentModal from '../components/AgentCard/TestAgentModal.jsx';
 
@@ -125,11 +125,6 @@ export default function Agents() {
                 {agent.memory_enabled && (
                   <span className="badge badge-blue flex items-center gap-1">
                     <Brain size={10} />Memory
-                  </span>
-                )}
-                {agent.schedule && (
-                  <span className="badge badge-blue flex items-center gap-1" title={`Cron: ${agent.schedule}`}>
-                    <Clock size={10} />Scheduled
                   </span>
                 )}
                 {agent.tools?.map(t => (
