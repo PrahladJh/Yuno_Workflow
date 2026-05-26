@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { agentsApi } from '../services/api.js';
-import { Bot, Plus, Trash2, Edit, Wrench, Brain, MessageCircle } from 'lucide-react';
+import { Bot, Plus, Trash2, Wrench, Brain, MessageCircle } from 'lucide-react';
 import AgentForm from '../components/AgentCard/AgentForm.jsx';
 import TestAgentModal from '../components/AgentCard/TestAgentModal.jsx';
 
@@ -25,7 +25,6 @@ const TOOL_LABELS = {
 export default function Agents() {
   const [agents, setAgents] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
   const [chatAgent, setChatAgent] = useState(null);
 
   const load = async () => {
@@ -45,15 +44,9 @@ export default function Agents() {
 
   const handleSave = async (data) => {
     try {
-      if (editing) {
-        await agentsApi.update(editing.id, data);
-        toast.success('Agent updated');
-      } else {
-        await agentsApi.create(data);
-        toast.success('Agent created');
-      }
+      await agentsApi.create(data);
+      toast.success('Agent created');
       setShowForm(false);
-      setEditing(null);
       load();
     } catch (e) { toast.error(e.error || 'Failed to save agent'); }
   };
@@ -70,12 +63,11 @@ export default function Agents() {
         </button>
       </div>
 
-      {(showForm || editing) && (
+      {showForm && (
         <div className="mb-6">
           <AgentForm
-            initial={editing}
             onSave={handleSave}
-            onCancel={() => { setShowForm(false); setEditing(null); }}
+            onCancel={() => setShowForm(false)}
           />
         </div>
       )}
@@ -101,11 +93,6 @@ export default function Agents() {
                   </div>
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={() => { setEditing(agent); setShowForm(false); }}
-                    className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                    title="Edit agent">
-                    <Edit size={14} />
-                  </button>
                   <button onClick={() => handleDelete(agent.id)}
                     className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                     title="Delete agent">
