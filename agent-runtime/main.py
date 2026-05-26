@@ -487,40 +487,58 @@ async def detect_pdf_fields(req: PDFDetectRequest):
                             "left_pt":   min(word_list[k]["left_pt"]   for k in range(i, j + 1)),
                         }
                     break   # extending only lowers the score
+        # Embed page info from the first word in the match window so callers
+        # know which page this label was found on (critical for multi-page PDFs).
+        if best is not None:
+            best["_page"]   = word_list[i].get("_page", 0)
+            best["_page_h"] = word_list[i].get("_page_h", pdf_page_h)
         return best
 
     # ── get PDF page dimensions + native text/drawing extraction ─────────────
+    # Processes ALL pages so multi-page PDFs get correct page indices.
     pdf_page_w, pdf_page_h = 595.0, 842.0
 
-    # Words extracted natively by PyMuPDF (exact — no OCR scaling uncertainty)
+    # Per-page fitz data: page_idx → {words, text_boxes, cb_boxes, pw, ph}
+    # Used for page-aware coordinate matching so fields land on the right page.
+    _fitz_page_data: dict[int, dict] = {}
+
+    # Flat combined lists across all pages (needed for global coord_words fallback)
     fitz_words:      list[dict] = []
-    # Drawn rectangles that look like text-input boxes (orange bordered, etc.)
     fitz_text_boxes: list[dict] = []
-    # Drawn small squares that look like checkboxes
     fitz_cb_boxes:   list[dict] = []
 
     try:
         import fitz as _fitz
         _d = _fitz.open(str(pdf_path.resolve()))
-        if _d.page_count:
-            _p = _d[0]
-            pdf_page_w = _p.rect.width
-            pdf_page_h = _p.rect.height
 
-            # ── Native text words (exact page-point coordinates) ──────────────
+        for _pi in range(_d.page_count):
+            _p  = _d[_pi]
+            _pw = _p.rect.width
+            _ph = _p.rect.height
+
+            if _pi == 0:
+                pdf_page_w = _pw
+                pdf_page_h = _ph
+
+            _pg_words:      list[dict] = []
+            _pg_text_boxes: list[dict] = []
+            _pg_cb_boxes:   list[dict] = []
+
+            # ── Native text words — tagged with their page index ──────────────
             for _w in _p.get_text("words"):
-                # get_text("words") → (x0, y0, x1, y1, word, block_no, line_no, word_no)
                 _word_text = (_w[4] or "").strip()
                 if _word_text:
-                    fitz_words.append({
+                    _pg_words.append({
                         "text":      _word_text,
                         "left_pt":   float(_w[0]),
                         "top_pt":    float(_w[1]),
                         "right_pt":  float(_w[2]),
                         "bottom_pt": float(_w[3]),
+                        "_page":     _pi,   # ← page index for later lookup
+                        "_page_h":   _ph,
                     })
 
-            # ── Drawn rectangles → form field boxes ───────────────────────────
+            # ── Drawn rectangles → form field boxes / checkboxes ──────────────
             for _drw in _p.get_drawings():
                 _rect = _drw.get("rect")
                 if _rect is None or _rect.is_empty:
@@ -529,27 +547,37 @@ async def detect_pdf_fields(req: PDFDetectRequest):
                 _rh = float(_rect.height)
                 if _rw <= 0 or _rh <= 0:
                     continue
-                # Small square → checkbox
                 if 5 <= _rw <= 28 and 5 <= _rh <= 28 and abs(_rw - _rh) <= 5:
-                    fitz_cb_boxes.append({
+                    _pg_cb_boxes.append({
                         "x0": float(_rect.x0), "y0": float(_rect.y0),
                         "x1": float(_rect.x1), "y1": float(_rect.y1),
                         "w": _rw, "h": _rh,
                         "cx": (_rect.x0 + _rect.x1) / 2.0,
                         "cy": (_rect.y0 + _rect.y1) / 2.0,
                     })
-                # Wider rectangle → text input box
                 elif _rw >= 40 and 8 <= _rh <= 50:
-                    fitz_text_boxes.append({
+                    _pg_text_boxes.append({
                         "x0": float(_rect.x0), "y0": float(_rect.y0),
                         "x1": float(_rect.x1), "y1": float(_rect.y1),
                         "w": _rw, "h": _rh,
-                        # fill_x: 4pt inside left edge; fill_y: 72% of height = baseline
                         "fill_x": float(_rect.x0) + 4.0,
                         "fill_y": float(_rect.y0) + _rh * 0.72,
                         "cx": (_rect.x0 + _rect.x1) / 2.0,
                         "cy": (_rect.y0 + _rect.y1) / 2.0,
                     })
+
+            # Store per-page (dedup happens below after _dedup_rects is defined)
+            _fitz_page_data[_pi] = {
+                "words":      _pg_words,
+                "text_boxes": _pg_text_boxes,   # deduped below
+                "cb_boxes":   _pg_cb_boxes,     # deduped below
+                "pw":         _pw,
+                "ph":         _ph,
+            }
+            fitz_words.extend(_pg_words)
+            fitz_text_boxes.extend(_pg_text_boxes)
+            fitz_cb_boxes.extend(_pg_cb_boxes)
+
         _d.close()
     except Exception:
         pass
@@ -584,16 +612,20 @@ async def detect_pdf_fields(req: PDFDetectRequest):
     fitz_text_boxes = _dedup_rects(fitz_text_boxes)
     fitz_cb_boxes   = _dedup_rects(fitz_cb_boxes)
 
-    # ── Helpers: match labels/options to drawn boxes ──────────────────────────
-    def _nearest_text_box(label_bb: dict) -> dict | None:
-        """
-        Find the drawn text-input rect that is closest to the RIGHT of (or BELOW)
-        the given label bounding box.  Returns None if no rect is close enough.
+    # Dedup per-page boxes too (used for page-aware nearest-box lookup)
+    for _pi, _pgd in _fitz_page_data.items():
+        _pgd["text_boxes"] = _dedup_rects(_pgd["text_boxes"])
+        _pgd["cb_boxes"]   = _dedup_rects(_pgd["cb_boxes"])
 
-        Vertical tolerance is 20 pt — tight enough to prevent row cross-matching
-        on typical forms where rows are spaced ≥ 25 pt apart.
+    # ── Helpers: match labels/options to drawn boxes ──────────────────────────
+    def _nearest_text_box(label_bb: dict, boxes: list | None = None) -> dict | None:
         """
-        if not label_bb or not fitz_text_boxes:
+        Find the drawn text-input rect closest to the RIGHT of (or BELOW) the label.
+        Pass the page-specific box list so cross-page matches are impossible.
+        Falls back to the global fitz_text_boxes when no per-page list is given.
+        """
+        search = boxes if boxes is not None else fitz_text_boxes
+        if not label_bb or not search:
             return None
         lright = label_bb["right_pt"]
         ltop   = label_bb["top_pt"]
@@ -601,36 +633,32 @@ async def detect_pdf_fields(req: PDFDetectRequest):
         lcy    = (ltop + lbot) / 2.0
 
         best_rect, best_dist = None, float("inf")
-        for tb in fitz_text_boxes:
-            # Case 1: same row — rect starts to the RIGHT of label
-            # Tight vert tolerance (20pt) prevents Status(y=360) → Nationality box(y=389)
+        for tb in search:
             if abs(tb["cy"] - lcy) <= 20 and tb["x0"] >= lright - 5:
                 dist = (tb["x0"] - lright) + abs(tb["cy"] - lcy) * 1.5
                 if dist < best_dist:
                     best_dist, best_rect = dist, tb
-            # Case 2: label is directly ABOVE the box (stacked layout)
             elif tb["y0"] >= lbot and tb["cy"] <= lbot + 45:
                 overlap = min(tb["x1"], label_bb["right_pt"]) - max(tb["x0"], label_bb["left_pt"])
                 if overlap > 0:
-                    dist = (tb["y0"] - lbot) + 200  # vertical penalty
+                    dist = (tb["y0"] - lbot) + 200
                     if dist < best_dist:
                         best_dist, best_rect = dist, tb
         return best_rect if best_dist < 350 else None
 
-    def _nearest_cb_box(opt_bb: dict) -> dict | None:
+    def _nearest_cb_box(opt_bb: dict, boxes: list | None = None) -> dict | None:
         """
-        Find the checkbox square closest to the LEFT of (or AT) the option text.
-        Skips the small multi-cell date-entry boxes (w < h+5 at y=Date row) because
-        they share the same row as date label text.
+        Find the checkbox square closest to the LEFT of the option text.
+        Pass the page-specific box list to avoid cross-page matches.
         """
-        if not opt_bb or not fitz_cb_boxes:
+        search = boxes if boxes is not None else fitz_cb_boxes
+        if not opt_bb or not search:
             return None
         oleft = opt_bb["left_pt"]
         ocy   = (opt_bb["top_pt"] + opt_bb["bottom_pt"]) / 2.0
 
         best_cb, best_dist = None, float("inf")
-        for cb in fitz_cb_boxes:
-            # Checkbox center must be to the left of (or very near) option text
+        for cb in search:
             if cb["cx"] > oleft + 10:
                 continue
             if abs(cb["cy"] - ocy) > 20:
@@ -688,12 +716,16 @@ async def detect_pdf_fields(req: PDFDetectRequest):
                         "scale":             "true",
                     },
                 )
-            for parsed in resp_b.json().get("ParsedResults", []):
+            # Enumerate ParsedResults — one entry per PDF page
+            for _ocr_pi, parsed in enumerate(resp_b.json().get("ParsedResults", [])):
                 overlay = parsed.get("TextOverlay", {})
+                # Use actual page dimensions from fitz if available (more accurate)
+                _ocr_pw = _fitz_page_data.get(_ocr_pi, {}).get("pw", pdf_page_w)
+                _ocr_ph = _fitz_page_data.get(_ocr_pi, {}).get("ph", pdf_page_h)
                 img_w   = overlay.get("OriginalPageWidth",  1240) or 1240
                 img_h   = overlay.get("OriginalPageHeight", 1754) or 1754
-                sx      = pdf_page_w / img_w
-                sy      = pdf_page_h / img_h
+                sx      = _ocr_pw / img_w
+                sy      = _ocr_ph / img_h
                 for line in overlay.get("Lines", []):
                     for word in line.get("Words", []):
                         wt = (word.get("WordText") or "").strip()
@@ -709,6 +741,8 @@ async def detect_pdf_fields(req: PDFDetectRequest):
                             "top_pt":    wtp        * sy,
                             "right_pt":  (wl + ww)  * sx,
                             "bottom_pt": (wtp + wh) * sy,
+                            "_page":     _ocr_pi,   # ← page index
+                            "_page_h":   _ocr_ph,
                         })
         except Exception:
             pass   # coordinates unavailable — fields will be cached without coords
@@ -771,13 +805,21 @@ OCR Text:
                         if label and label not in seen:
                             seen.add(label)
                             opts_with_coords = []
+                            cb_page    = 0
+                            cb_page_h  = pdf_page_h
                             for opt in options:
                                 bb = _label_bbox(opt["text"], coord_words)
                                 if bb:
+                                    # Determine which page this option is on
+                                    opt_page   = bb.get("_page", 0)
+                                    opt_page_h = bb.get("_page_h", pdf_page_h)
+                                    cb_page    = opt_page
+                                    cb_page_h  = opt_page_h
                                     oh = bb["bottom_pt"] - bb["top_pt"]
                                     bs = max(oh, 8.0)
-                                    # Priority 1: drawn checkbox square near option text
-                                    drw_cb = _nearest_cb_box(bb)
+                                    # Use page-specific cb_boxes to avoid cross-page matches
+                                    pg_cb_boxes = _fitz_page_data.get(opt_page, {}).get("cb_boxes", fitz_cb_boxes)
+                                    drw_cb = _nearest_cb_box(bb, pg_cb_boxes)
                                     if drw_cb:
                                         opts_with_coords.append({
                                             "text": opt["text"],
@@ -788,7 +830,6 @@ OCR Text:
                                             "ocr_flat": True,
                                         })
                                     else:
-                                        # Fallback: to the LEFT of the option text
                                         opts_with_coords.append({
                                             "text": opt["text"],
                                             "x":    max(0.0, bb["left_pt"] - bs - 3),
@@ -801,8 +842,8 @@ OCR Text:
                             checkboxes.append({
                                 "label":       label,
                                 "options":     opts_with_coords,
-                                "page":        0,
-                                "page_height": pdf_page_h,
+                                "page":        cb_page,    # ← correct page
+                                "page_height": cb_page_h,
                             })
                 else:
                     if line and line not in seen and len(line) <= 60:
@@ -814,32 +855,35 @@ OCR Text:
                             "max_chars": 100,
                         }
                         if bb:
+                            # Resolve which page this label belongs to
+                            label_page   = bb.get("_page", 0)
+                            label_page_h = bb.get("_page_h", pdf_page_h)
+                            label_page_w = _fitz_page_data.get(label_page, {}).get("pw", pdf_page_w)
                             lh = bb["bottom_pt"] - bb["top_pt"]
-                            # Priority 1: find the ACTUAL drawn fill rectangle near this label
-                            drw_box = _nearest_text_box(bb)
+                            # Use page-specific text boxes to avoid cross-page matches
+                            pg_text_boxes = _fitz_page_data.get(label_page, {}).get("text_boxes", fitz_text_boxes)
+                            drw_box = _nearest_text_box(bb, pg_text_boxes)
                             if drw_box:
-                                # Use interior of the drawn rectangle (exact!)
                                 field_entry.update({
                                     "x":           drw_box["fill_x"],
                                     "y":           drw_box["fill_y"],
                                     "line_end_x":  drw_box["x1"] - 4,
                                     "max_chars":   max(1, int((drw_box["w"] - 8) / 6.0)),
-                                    "page":        0,
-                                    "page_height": pdf_page_h,
+                                    "page":        label_page,    # ← correct page
+                                    "page_height": label_page_h,
                                     "ocr_flat":    True,
                                 })
                             else:
-                                # Fallback: estimate from label right edge + gap
                                 gap = 20.0
                                 fx  = bb["right_pt"] + gap
                                 fy  = bb["top_pt"] + lh * 0.75
                                 field_entry.update({
                                     "x":           fx,
                                     "y":           fy,
-                                    "line_end_x":  pdf_page_w - 10,
-                                    "max_chars":   max(1, int((pdf_page_w - fx - 10) / 6.0)),
-                                    "page":        0,
-                                    "page_height": pdf_page_h,
+                                    "line_end_x":  label_page_w - 10,
+                                    "max_chars":   max(1, int((label_page_w - fx - 10) / 6.0)),
+                                    "page":        label_page,    # ← correct page
+                                    "page_height": label_page_h,
                                     "ocr_flat":    True,
                                 })
                         fields.append(field_entry)
