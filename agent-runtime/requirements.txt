@@ -1,0 +1,43 @@
+# ── Core runtime ──────────────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-dotenv==1.0.1
+pydantic==2.9.2
+sse-starlette==2.1.3
+
+# ── LangChain / LangGraph ─────────────────────────────────────────────────────
+langchain==0.3.7
+langchain-openai==0.2.14
+langchain-community==0.3.7
+langgraph==0.2.45
+openai==1.57.0
+
+# ── Built-in tools ────────────────────────────────────────────────────────────
+httpx==0.27.2
+duckduckgo-search==6.3.7
+
+# ── GitHub / workspace tools ──────────────────────────────────────────────────
+gitpython>=3.1.40            # git operations (fallback to subprocess git if unavailable)
+
+# ── File upload & export ──────────────────────────────────────────────────────
+python-multipart>=0.0.9      # FastAPI file upload support
+fpdf2>=2.7.9                 # PDF generation (agent response → downloadable PDF)
+openpyxl>=3.1.2              # Excel generation (agent response → downloadable .xlsx)
+google-api-python-client>=2.140.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.1
+python-docx>=1.1.2
+
+# ── PDF form detection (detect_form_fields.py) ────────────────────────────────
+# Install separately if you need PDF analysis:
+#   pip install pymupdf opencv-python pytesseract numpy
+# pymupdf>=1.23.0
+# opencv-python>=4.9.0
+# pytesseract>=0.3.10
+# numpy>=1.26.0
+
+# ── MCP server integration (optional) ─────────────────────────────────────────
+# Enables agents to connect to MCP servers (GitHub MCP, Filesystem MCP, etc.)
+#   pip install langchain-mcp-adapters mcp
+# langchain-mcp-adapters>=0.1.0
+# mcp>=1.0.0
